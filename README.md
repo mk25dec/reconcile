@@ -1,70 +1,53 @@
-# Astro code
+# reconcile
 
-## Push changes to the remote
+## What this is for
 
-Remote: `origin` → `file:///media/irene/linux/repo` (bare repo on this machine).
+Reconcile two Parquet files by key columns and export mismatches.
 
-```bash
-cd /media/irene/linux/cccc/astro/code
-git status
-git add <paths>              # e.g. shared_lib modules_data_processor/some-module
-git commit -m "Short message"
-git push                     # after first push: upstream is set; else: git push -u origin main
-```
+## Inputs
 
-First time on a new branch: `git push -u origin <branch-name>`.
+- **Files:** Exactly two Parquet files (`.parquet` / `.pq`), repeat **`-i` / `--input-file`**.
+- **Keys:** Repeat **`-k` / `--key-column`**, or use **`--key-columns-json`**.
+- **Compare columns:** Optional **`-c` / `--compare-column`** or **`--compare-columns-json`**; default is all shared non-key columns.
 
-### `shared_lib` only (push)
+## Outputs
 
-```bash
-cd /media/irene/linux/cccc/astro/code
-git status shared_lib/
-git add shared_lib/
-git commit -m "Describe the shared_lib change"
-git push origin main
-```
+Under **`-o` / `--output-directory`** (default: folder of the first input):
 
----
+- **`reconcile_detail_<timestamp>.<ext>`** — detail report. Use **`-O` / `--output-format` / `--output`**: `csv`, `parquet`, or `excel` (`xlsx`); default is **excel**.
+  By default it includes all available non-key columns; use `--output-columns-mode compared_only` to narrow to compared columns only.
+- For **`csv`** and **`parquet`** outputs, a separate **`reconcile_stats_<timestamp>.<ext>`** file is also written.
+- For **`excel`** output, stats are included in the workbook as a **`stats`** sheet.
+- **`--all-data`** adds:
+  - **`reconcile_all_data_left_<timestamp>.<ext>`**
+  - **`reconcile_all_data_right_<timestamp>.<ext>`**
+  Each includes all columns from that input plus reconcile markers (`x_match_row`, `x_break_count`, `x_break_columns`).
+- **`--only-breaks-data`** keeps only rows where `x_break_count > 0` in detail output and in `--all-data` outputs.
+- **`--write-summary-json`** adds **`reconcile_summary_<timestamp>.json`**.
 
-## Clone and pull (for others)
-
-**Same machine** (path to the bare repo is readable):
+## Run
 
 ```bash
-git clone file:///media/irene/linux/repo astro-code
-cd astro-code
-# later updates:
-git pull origin main
+cd modules_data_processor/reconcile
+pixi install
+
+pixi run reconcile -- \
+  -i /path/a.parquet \
+  -i /path/b.parquet \
+  -k id \
+  --all-data
+
+pixi run help
 ```
 
-`git pull` updates the **whole** clone (not a single folder). After a pull, your `shared_lib/` tree matches `main` on the remote for that path.
-
-### `shared_lib` (pull latest after someone else pushed)
+JSON result on stdout:
 
 ```bash
-cd /media/irene/linux/cccc/astro/code   # or your clone path
-git pull origin main
-# optional: see what changed under shared_lib
-git log -n 5 --oneline -- shared_lib/
+pixi run reconcile -- -i a.parquet -i b.parquet -k id -O parquet --all-data -j
 ```
 
-Use the branch you track (often `main`; check with `git branch -a`).
+## Layout
 
----
-
-## Stop tracking a path already on `main` (e.g. `shared_lib/old/`)
-
-`.gitignore` only affects **untracked** files. Paths that were **already committed** stay on the branch until you remove them from the index (files can stay on disk).
-
-Ensure the path is listed in `.gitignore` (e.g. `old/` in `shared_lib/.gitignore`), then:
-
-```bash
-cd /media/irene/linux/cccc/astro/code
-git rm -r --cached shared_lib/old/
-git commit -m "Stop tracking shared_lib/old; keep ignored locally"
-git push origin main
-```
-
-`git rm -r --cached` drops tracking but does **not** delete the folder from your working tree.
-
-**Another computer** cannot use `file:///media/irene/linux/...` on your disk. Put the bare repo on a shared path, serve it over SSH/Git, or mirror to GitHub/GitLab and share that URL; then clone with that URL and `git pull` as usual.
+- `src/reconcile/cli.py` — Typer CLI, **`SharedResult`** / **`--json`**
+- `src/reconcile/reconcile_core.py` — validation and CLI orchestration
+- `src/reconcile/reconcile_engine.py` — DuckDB+pandas reconciliation and output writing
